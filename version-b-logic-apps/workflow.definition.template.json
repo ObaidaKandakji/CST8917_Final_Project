@@ -1,0 +1,415 @@
+{
+  "definition": {
+    "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+      "$connections": {
+        "defaultValue": {},
+        "type": "Object"
+      },
+      "validateExpenseUrl": {
+        "defaultValue": "__VALIDATE_EXPENSE_URL__",
+        "type": "String"
+      },
+      "managerDecisionUrl": {
+        "defaultValue": "__MANAGER_DECISION_URL__",
+        "type": "String"
+      },
+      "serviceBusQueueName": {
+        "defaultValue": "expense-requests",
+        "type": "String"
+      },
+      "serviceBusTopicName": {
+        "defaultValue": "expense-outcomes",
+        "type": "String"
+      }
+    },
+    "triggers": {
+      "When_Message_Received_From_Expense_Queue": {
+        "type": "ApiConnection",
+        "recurrence": {
+          "frequency": "Minute",
+          "interval": 1
+        },
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['servicebus']['connectionId']"
+            }
+          },
+          "method": "get",
+          "path": "/@{encodeURIComponent(encodeURIComponent(parameters('serviceBusQueueName')))}\/messages\/head",
+          "queries": {
+            "queueType": "Main"
+          }
+        }
+      }
+    },
+    "actions": {
+      "Parse_Expense_Request": {
+        "type": "ParseJson",
+        "runAfter": {},
+        "inputs": {
+          "content": "@json(base64ToString(triggerBody()?['ContentData']))",
+          "schema": {
+            "type": "object",
+            "properties": {
+              "expenseId": {
+                "type": "string"
+              },
+              "employeeName": {
+                "type": "string"
+              },
+              "employeeEmail": {
+                "type": "string"
+              },
+              "amount": {
+                "type": "number"
+              },
+              "category": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "managerEmail": {
+                "type": "string"
+              },
+              "createdAtUtc": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "expenseId",
+              "employeeName",
+              "employeeEmail",
+              "amount",
+              "category",
+              "description",
+              "managerEmail"
+            ]
+          }
+        }
+      },
+      "Validate_Expense": {
+        "type": "Http",
+        "runAfter": {
+          "Parse_Expense_Request": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "method": "POST",
+          "uri": "@parameters('validateExpenseUrl')",
+          "headers": {
+            "Content-Type": "application/json"
+          },
+          "body": "@body('Parse_Expense_Request')"
+        }
+      },
+      "Terminate_Validation_Failure": {
+        "type": "Terminate",
+        "runAfter": {
+          "Validate_Expense": [
+            "Failed",
+            "TimedOut"
+          ]
+        },
+        "inputs": {
+          "runStatus": "Failed",
+          "runError": {
+            "code": "ValidationFailed",
+            "message": "Expense validation failed inside the Logic App workflow."
+          }
+        }
+      },
+      "Initialize_Outcome": {
+        "type": "InitializeVariable",
+        "runAfter": {
+          "Validate_Expense": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "variables": [
+            {
+              "name": "Outcome",
+              "type": "string",
+              "value": ""
+            }
+          ]
+        }
+      },
+      "Initialize_Escalated": {
+        "type": "InitializeVariable",
+        "runAfter": {
+          "Initialize_Outcome": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "variables": [
+            {
+              "name": "Escalated",
+              "type": "boolean",
+              "value": false
+            }
+          ]
+        }
+      },
+      "Initialize_ManagerDecisionReceived": {
+        "type": "InitializeVariable",
+        "runAfter": {
+          "Initialize_Escalated": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "variables": [
+            {
+              "name": "ManagerDecisionReceived",
+              "type": "boolean",
+              "value": false
+            }
+          ]
+        }
+      },
+      "Manager_Approval_Required": {
+        "type": "If",
+        "runAfter": {
+          "Initialize_ManagerDecisionReceived": [
+            "Succeeded"
+          ]
+        },
+        "expression": "@greaterOrEquals(float(body('Parse_Expense_Request')?['amount']), 100)",
+        "actions": {
+          "Poll_For_Manager_Decision": {
+            "type": "Until",
+            "runAfter": {},
+            "expression": "@equals(variables('ManagerDecisionReceived'), true)",
+            "limit": {
+              "count": 8,
+              "timeout": "PT2M"
+            },
+            "actions": {
+              "Get_Manager_Decision": {
+                "type": "Http",
+                "runAfter": {},
+                "inputs": {
+                  "method": "GET",
+                  "uri": "@concat(parameters('managerDecisionUrl'), '/', body('Parse_Expense_Request')?['expenseId'])"
+                }
+              },
+              "Decision_Found": {
+                "type": "If",
+                "runAfter": {
+                  "Get_Manager_Decision": [
+                    "Succeeded"
+                  ]
+                },
+                "expression": "@equals(body('Get_Manager_Decision')?['found'], true)",
+                "actions": {
+                  "Decision_Is_Approved": {
+                    "type": "If",
+                    "runAfter": {},
+                    "expression": "@equals(body('Get_Manager_Decision')?['decision'], 'approved')",
+                    "actions": {
+                      "Set_Approved_Outcome": {
+                        "type": "SetVariable",
+                        "runAfter": {},
+                        "inputs": {
+                          "name": "Outcome",
+                          "value": "approved"
+                        }
+                      }
+                    },
+                    "else": {
+                      "actions": {
+                        "Set_Rejected_Outcome": {
+                          "type": "SetVariable",
+                          "runAfter": {},
+                          "inputs": {
+                            "name": "Outcome",
+                            "value": "rejected"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "Mark_ManagerDecisionReceived": {
+                    "type": "SetVariable",
+                    "runAfter": {
+                      "Decision_Is_Approved": [
+                        "Succeeded"
+                      ]
+                    },
+                    "inputs": {
+                      "name": "ManagerDecisionReceived",
+                      "value": true
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                }
+              },
+              "Still_Waiting": {
+                "type": "If",
+                "runAfter": {
+                  "Decision_Found": [
+                    "Succeeded"
+                  ]
+                },
+                "expression": "@equals(variables('ManagerDecisionReceived'), false)",
+                "actions": {
+                  "Delay_15_Seconds": {
+                    "type": "Wait",
+                    "runAfter": {},
+                    "inputs": {
+                      "interval": {
+                        "count": 15,
+                        "unit": "Second"
+                      }
+                    }
+                  }
+                },
+                "else": {
+                  "actions": {}
+                }
+              }
+            }
+          },
+          "Escalate_When_No_Decision_Received": {
+            "type": "If",
+            "runAfter": {
+              "Poll_For_Manager_Decision": [
+                "Succeeded"
+              ]
+            },
+            "expression": "@equals(variables('ManagerDecisionReceived'), false)",
+            "actions": {
+              "Mark_Escalated": {
+                "type": "SetVariable",
+                "runAfter": {},
+                "inputs": {
+                  "name": "Escalated",
+                  "value": true
+                }
+              },
+              "Set_Escalated_Outcome": {
+                "type": "SetVariable",
+                "runAfter": {
+                  "Mark_Escalated": [
+                    "Succeeded"
+                  ]
+                },
+                "inputs": {
+                  "name": "Outcome",
+                  "value": "escalated"
+                }
+              }
+            },
+            "else": {
+              "actions": {}
+            }
+          }
+        },
+        "else": {
+          "actions": {
+            "Set_AutoApproved_Outcome": {
+              "type": "SetVariable",
+              "runAfter": {},
+              "inputs": {
+                "name": "Outcome",
+                "value": "approved"
+              }
+            }
+          }
+        }
+      },
+      "Compose_Final_Outcome": {
+        "type": "Compose",
+        "runAfter": {
+          "Manager_Approval_Required": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "expenseId": "@body('Parse_Expense_Request')?['expenseId']",
+          "employeeName": "@body('Parse_Expense_Request')?['employeeName']",
+          "employeeEmail": "@body('Parse_Expense_Request')?['employeeEmail']",
+          "amount": "@body('Parse_Expense_Request')?['amount']",
+          "category": "@body('Parse_Expense_Request')?['category']",
+          "description": "@body('Parse_Expense_Request')?['description']",
+          "managerEmail": "@body('Parse_Expense_Request')?['managerEmail']",
+          "outcome": "@variables('Outcome')",
+          "escalated": "@variables('Escalated')"
+        }
+      },
+      "Send_Outcome_Message": {
+        "type": "ApiConnection",
+        "runAfter": {
+          "Compose_Final_Outcome": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['servicebus']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/@{encodeURIComponent(encodeURIComponent(parameters('serviceBusTopicName')))}\/messages",
+          "body": {
+            "ContentData": "@base64(string(outputs('Compose_Final_Outcome')))",
+            "ContentType": "application/json",
+            "MessageId": "@body('Parse_Expense_Request')?['expenseId']",
+            "Properties": {
+              "outcome": "@variables('Outcome')"
+            }
+          }
+        }
+      },
+      "Send_Notification_Email": {
+        "type": "ApiConnection",
+        "runAfter": {
+          "Send_Outcome_Message": [
+            "Succeeded"
+          ]
+        },
+        "inputs": {
+          "host": {
+            "connection": {
+              "name": "@parameters('$connections')['office365']['connectionId']"
+            }
+          },
+          "method": "post",
+          "path": "/v2/Mail",
+          "body": {
+            "To": "@body('Parse_Expense_Request')?['employeeEmail']",
+            "Subject": "@concat('Expense request ', body('Parse_Expense_Request')?['expenseId'], ' is ', variables('Outcome'))",
+            "Body": "<p>Hello @{body('Parse_Expense_Request')?['employeeName']},</p><p>Your expense request for $@{body('Parse_Expense_Request')?['amount']} in the @{body('Parse_Expense_Request')?['category']} category has a final outcome of <strong>@{variables('Outcome')}</strong>.</p><p>Escalated: @{variables('Escalated')}</p><p>Description: @{body('Parse_Expense_Request')?['description']}</p>"
+          }
+        }
+      }
+    },
+    "outputs": {}
+  },
+  "parameters": {
+    "$connections": {
+      "value": {
+        "servicebus": {
+          "connectionId": "/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/__RESOURCE_GROUP__/providers/Microsoft.Web/connections/__SERVICEBUS_CONNECTION_NAME__",
+          "connectionName": "__SERVICEBUS_CONNECTION_NAME__",
+          "id": "/subscriptions/__SUBSCRIPTION_ID__/providers/Microsoft.Web/locations/__LOCATION__/managedApis/servicebus"
+        },
+        "office365": {
+          "connectionId": "/subscriptions/__SUBSCRIPTION_ID__/resourceGroups/__RESOURCE_GROUP__/providers/Microsoft.Web/connections/__OFFICE365_CONNECTION_NAME__",
+          "connectionName": "__OFFICE365_CONNECTION_NAME__",
+          "id": "/subscriptions/__SUBSCRIPTION_ID__/providers/Microsoft.Web/locations/__LOCATION__/managedApis/office365"
+        }
+      }
+    }
+  }
+}

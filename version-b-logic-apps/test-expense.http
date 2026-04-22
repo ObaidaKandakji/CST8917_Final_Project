@@ -1,0 +1,175 @@
+@logicHelperBaseUrl = https://cst8917-logic-helper-04202339.azurewebsites.net
+@contentType = application/json
+
+# Paste returned IDs here before running the related manager-decision requests.
+@approvalExpenseId = 37cadcb0-ad07-44e3-b31e-ef15fabed2f8
+@rejectionExpenseId = 262994c4-408f-47cb-89b8-fc22c84a5449
+@escalatedExpenseId = 8f798406-2244-4534-8912-18cc73883468
+
+### 1. Validate request payload directly -> 200 when valid
+POST {{logicHelperBaseUrl}}/api/validate-expense
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Avery Valid",
+  "employeeEmail": "avery.valid@example.com",
+  "amount": 89.50,
+  "category": "supplies",
+  "description": "Whiteboard markers",
+  "managerEmail": "manager.valid@example.com"
+}
+
+### 2. Valid expense under $100 -> queue request for auto-approval
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Avery Auto",
+  "employeeEmail": "avery.auto@example.com",
+  "amount": 89.50,
+  "category": "supplies",
+  "description": "Whiteboard markers",
+  "managerEmail": "manager.auto@example.com"
+}
+
+### After sending request 2:
+# 1. Wait about 1-2 minutes.
+# 2. Verify the Logic App run history shows the auto-approved branch.
+# 3. Verify the employee email arrived.
+# 4. Verify the approved subscription count increased.
+
+### 3. Valid expense >= $100 -> create request for manager approval path
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Jordan Approve",
+  "employeeEmail": "jordan.approve@example.com",
+  "amount": 320.00,
+  "category": "travel",
+  "description": "Conference hotel reimbursement",
+  "managerEmail": "manager.approve@example.com"
+}
+
+### 3a. Manager approves the expense
+POST {{logicHelperBaseUrl}}/api/manager-decisions
+Content-Type: {{contentType}}
+
+{
+  "expenseId": "{{approvalExpenseId}}",
+  "decision": "approved"
+}
+
+### 3b. Verify stored manager decision
+GET {{logicHelperBaseUrl}}/api/manager-decisions/{{approvalExpenseId}}
+
+### After sending requests 3, 3a, and 3b:
+# 1. Wait about 1-2 minutes.
+# 2. Verify the Logic App run history shows the approved branch.
+# 3. Verify the employee email arrived.
+# 4. Verify the approved subscription count increased.
+
+### 4. Valid expense >= $100 -> create request for rejection path
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Jordan Reject",
+  "employeeEmail": "jordan.reject@example.com",
+  "amount": 540.00,
+  "category": "equipment",
+  "description": "Tablet purchase",
+  "managerEmail": "manager.reject@example.com"
+}
+
+### 4a. Manager rejects the expense
+POST {{logicHelperBaseUrl}}/api/manager-decisions
+Content-Type: {{contentType}}
+
+{
+  "expenseId": "{{rejectionExpenseId}}",
+  "decision": "rejected"
+}
+
+### 4b. Verify stored manager decision
+GET {{logicHelperBaseUrl}}/api/manager-decisions/{{rejectionExpenseId}}
+
+### After sending requests 4, 4a, and 4b:
+# 1. Wait about 1-2 minutes.
+# 2. Verify the Logic App run history shows the rejected branch.
+# 3. Verify the employee email arrived.
+# 4. Verify the rejected subscription count increased.
+
+### 5. Valid expense >= $100, no manager response -> Escalated
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Casey Escalated",
+  "employeeEmail": "casey.escalated@example.com",
+  "amount": 210.00,
+  "category": "software",
+  "description": "Specialized design tool renewal",
+  "managerEmail": "manager.escalated@example.com"
+}
+
+### Optional: check that no manager decision exists yet
+GET {{logicHelperBaseUrl}}/api/manager-decisions/{{escalatedExpenseId}}
+
+### After sending request 5:
+# 1. Wait at least 3-4 minutes total for queue pickup plus the 2-minute polling timeout.
+# 2. Verify the Logic App run history shows the escalated branch.
+# 3. Verify the employee email arrived.
+# 4. Verify the escalated subscription count increased.
+
+### 6. Missing required fields -> Validation error on direct validation endpoint
+POST {{logicHelperBaseUrl}}/api/validate-expense
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "",
+  "employeeEmail": "missing.fields@example.com",
+  "amount": 19.99,
+  "category": "meals",
+  "description": "",
+  "managerEmail": "manager@example.com"
+}
+
+### 6a. Missing required fields -> Validation error on queue ingress endpoint
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "",
+  "employeeEmail": "missing.fields@example.com",
+  "amount": 19.99,
+  "category": "meals",
+  "description": "",
+  "managerEmail": "manager@example.com"
+}
+
+### 7. Invalid category -> Validation error on direct validation endpoint
+POST {{logicHelperBaseUrl}}/api/validate-expense
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Morgan Invalid",
+  "employeeEmail": "morgan.invalid@example.com",
+  "amount": 45.00,
+  "category": "hardware",
+  "description": "Unsupported category",
+  "managerEmail": "manager.invalid@example.com"
+}
+
+### 7a. Invalid category -> Validation error on queue ingress endpoint
+POST {{logicHelperBaseUrl}}/api/expense-requests
+Content-Type: {{contentType}}
+
+{
+  "employeeName": "Morgan Invalid",
+  "employeeEmail": "morgan.invalid@example.com",
+  "amount": 45.00,
+  "category": "hardware",
+  "description": "Unsupported category",
+  "managerEmail": "manager.invalid@example.com"
+}

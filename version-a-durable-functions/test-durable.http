@@ -1,0 +1,117 @@
+@baseUrl = http://localhost:7071/api
+
+### 1) Valid expense under $100 -> Auto-approved
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "Alice Johnson",
+  "employee_email": "alice@company.com",
+  "amount": 75,
+  "category": "meals",
+  "description": "Team lunch",
+  "manager_email": "manager@company.com"
+}
+
+### Copy the instanceId from the response above and paste it below if you want to confirm final status.
+GET {{baseUrl}}/expenses/status/00776278017142e599ef16640d08bc24
+
+### 2) Valid expense >= $100, manager approves -> Approved
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "Bob Smith",
+  "employee_email": "bob@company.com",
+  "amount": 250,
+  "category": "travel",
+  "description": "Conference train ticket",
+  "manager_email": "manager@company.com"
+}
+
+### After starting, copy the instanceId and approve it.
+POST {{baseUrl}}/expenses/decision/35c312bc0ff14de9954ad175ad30d688
+Content-Type: application/json
+
+{
+  "decision": "approved",
+  "manager_email": "manager@company.com",
+  "comment": "Looks good."
+}
+
+### Check approved status.
+GET {{baseUrl}}/expenses/status/35c312bc0ff14de9954ad175ad30d688
+
+### 3) Valid expense >= $100, manager rejects -> Rejected
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "Carol Lee",
+  "employee_email": "carol@company.com",
+  "amount": 600,
+  "category": "equipment",
+  "description": "Desk accessory request",
+  "manager_email": "manager@company.com"
+}
+
+### After starting, copy the instanceId and reject it.
+POST {{baseUrl}}/expenses/decision/4a1468340dda41e2b9ee62d53e92f6e1
+Content-Type: application/json
+
+{
+  "decision": "rejected",
+  "manager_email": "manager@company.com",
+  "comment": "Not approved at this time."
+}
+
+### Check rejected status.
+GET {{baseUrl}}/expenses/status/4a1468340dda41e2b9ee62d53e92f6e1
+
+### 4) Valid expense >= $100, no manager response -> Escalated
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "David Chen",
+  "employee_email": "david@company.com",
+  "amount": 300,
+  "category": "software",
+  "description": "License renewal",
+  "manager_email": "manager@company.com"
+}
+
+### Do NOT call the decision endpoint. Wait for the timeout from local.settings.json, then query status.
+GET {{baseUrl}}/expenses/status/87252c08f1c94f7083bd8923e6f965ce
+
+### 5) Missing required fields -> Validation error
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "",
+  "employee_email": "invalid@company.com",
+  "amount": 150,
+  "category": "travel",
+  "description": "",
+  "manager_email": "manager@company.com"
+}
+
+### Copy the instanceId from the response above and query final status.
+GET {{baseUrl}}/expenses/status/1c9c9b1790d34a29b0bde304eb2f7e14
+
+### 6) Invalid category -> Validation error
+POST {{baseUrl}}/expenses/start
+Content-Type: application/json
+
+{
+  "employee_name": "Eva White",
+  "employee_email": "eva@company.com",
+  "amount": 120,
+  "category": "gaming",
+  "description": "Invalid category example",
+  "manager_email": "manager@company.com"
+}
+
+### Copy the instanceId from the response above and query final status.
+GET {{baseUrl}}/expenses/status/2f6e2351decd4763ad33bc07dd34197c
