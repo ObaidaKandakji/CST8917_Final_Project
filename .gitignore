@@ -1,12 +1,24 @@
+# Python
 **/__pycache__/
 **/*.pyc
+**/*.pyo
+**/*.pyd
+
+# Local Azure Functions settings
 **/local.settings.json
-**/.python_packages/
+
+# Virtual environments and editor folders
 **/.venv/
 **/.vscode/
-**/.azurite/
+
+# Azure Functions local dependencies / artifacts
+**/.python_packages/
+**/.funcignore
 **/func-start.stdout.log
 **/func-start.stderr.log
+
+# Azurite and local storage artifacts
+**/.azurite/
 **/AzuriteConfig
 **/__azurite_db_blob__.json
 **/__azurite_db_blob_extent__.json
@@ -15,3 +27,7 @@
 **/__azurite_db_table__.json
 **/__blobstorage__/
 **/__queuestorage__/
+
+# OS clutter
+.DS_Store
+Thumbs.db
